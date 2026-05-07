@@ -1,0 +1,99 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+backend/venv/
+
+# Build
+*.egg-info/
+dist/
+build/
+
+# =========================
+# Database
+# =========================
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================
+# Environment Variables
+# =========================
+.env
+.env.local
+.env.production
+
+# =========================
+# AI Models / HuggingFace
+# =========================
+models/
+data/
+
+# PyTorch / Diffusers
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+
+# HuggingFace cache
+.cache/
+huggingface/
+.huggingface/
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# React / Node
+# =========================
+node_modules/
+frontend/node_modules/
+
+frontend/build/
+
+frontend/.pnpm-debug.log*
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# =========================
+# Testing
+# =========================
+.coverage
+htmlcov/
+.pytest_cache/
+
+# =========================
+# Temporary Files
+# =========================
+tmp/
+temp/
+*.tmp
