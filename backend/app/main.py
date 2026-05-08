@@ -2,7 +2,7 @@
 OmniBot - Multi-Platform Conversational AI
 Main FastAPI Application
 """
-
+import os
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -73,14 +73,17 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-import os
+
+
+# Get API base URL from environment (for deployment)
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
-# CORS middleware
+# CORS configuration - allow frontend to access API
 ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5000",
-    FRONTEND_URL,
+    "http://localhost:3000",  # Local development
+    "http://localhost:5000",  # Alternative local
+    FRONTEND_URL,  # Production frontend
 ]
 
 app.add_middleware(
@@ -181,9 +184,8 @@ async def generate_image(request: ImageGenerationRequest):
     """
     Generate images from text descriptions using Stable Diffusion
     """
-    # ADD at start of function:
     if image_service is None:
-        raise HTTPException(status_code=503, detail="Image generation disabled")
+        raise HTTPException(status_code=503, detail="Image generation is disabled on this server")
     
     try:
         # Generate image
@@ -224,7 +226,7 @@ async def speech_to_text(audio: UploadFile = File(...), language: Optional[str] 
         # Convert speech to text
         text = await voice_service.speech_to_text(audio_data, language=language)
         
-        return {"text": text, "language": language}
+        return {"text": text, "language": language}  # ← Make sure this returns JSON
         
     except Exception as e:
         logger.error(f"Speech to text error: {str(e)}")
