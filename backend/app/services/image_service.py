@@ -19,7 +19,7 @@ class ImageService:
     Uses free Hugging Face models
     """
     
-    def __init__(self, model_id: str = model_id = "segmind/tiny-sd"):
+    def __init__(self, model_id: str = "segmind/tiny-sd"):
         """
         Initialize image generation service
         

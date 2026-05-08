@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
     
     # Initialize services
     nlp_service = NLPService()
-    image_service = ImageService()
+    image_service = None # Disable image generation for now to save resources
     voice_service = VoiceService()
     translation_service = TranslationService()
     personality_manager = PersonalityManager()
@@ -73,10 +73,19 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+import os
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
 # CORS middleware
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5000",
+    FRONTEND_URL,
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -172,6 +181,10 @@ async def generate_image(request: ImageGenerationRequest):
     """
     Generate images from text descriptions using Stable Diffusion
     """
+    # ADD at start of function:
+    if image_service is None:
+        raise HTTPException(status_code=503, detail="Image generation disabled")
+    
     try:
         # Generate image
         image_data = await image_service.generate_image(

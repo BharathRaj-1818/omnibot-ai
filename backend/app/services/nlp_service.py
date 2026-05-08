@@ -18,7 +18,7 @@ class NLPService:
     Uses DialoGPT for conversational AI
     """
     
-    def __init__(self, model_name: str = "microsoft/DialoGPT-medium"):
+    def __init__(self, model_name: str = "microsoft/DialoGPT-small"):
         """
         Initialize NLP service with conversational model
         
