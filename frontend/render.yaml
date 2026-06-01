@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: omnibot-frontend
-    env: node
-    plan: free
-    buildCommand: npm install && npm run build
-    startCommand: npm install -g serve && serve -s build -l 3000

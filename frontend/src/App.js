@@ -5,6 +5,7 @@ import {
   Smile, Briefcase, Sparkles, Download, Volume2 
 } from 'lucide-react';
 import axios from 'axios';
+import ChatPage from './pages/ChatPage';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 

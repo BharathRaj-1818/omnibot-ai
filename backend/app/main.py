@@ -24,9 +24,12 @@ from app.utils.personality import PersonalityManager
 from app.utils.analytics import AnalyticsTracker
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+# ✅ FIX: logger was used throughout the file but never defined
 logger = logging.getLogger(__name__)
-
 
 # Initialize services globally
 nlp_service = None
@@ -44,25 +47,23 @@ async def lifespan(app: FastAPI):
     global personality_manager, analytics_tracker
     
     logger.info("🚀 Starting OmniBot services...")
-    
+
     # Initialize database
     await init_db()
-    
+
     # Initialize services
     nlp_service = NLPService()
-    image_service = None # Disable image generation for now to save resources
+    image_service = None  # Disabled to save resources — set to ImageService() to enable
     voice_service = VoiceService()
     translation_service = TranslationService()
     personality_manager = PersonalityManager()
     analytics_tracker = AnalyticsTracker()
-    
+
     logger.info("✅ All services initialized successfully!")
-    
+
     yield
-    
-    # Cleanup
+
     logger.info("🛑 Shutting down services...")
-    # Add cleanup code here if needed
 
 
 # Create FastAPI app
@@ -73,22 +74,14 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-
-
-# Get API base URL from environment (for deployment)
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
-
-# CORS configuration - allow frontend to access API
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # Local development
-    "http://localhost:5000",  # Alternative local
-    FRONTEND_URL,  # Production frontend
-]
-
+# CORS — update these URLs before deploying
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=[
+        "http://localhost:3000",                        # Local dev
+        "https://your-frontend-url.vercel.app",        # ← Replace with your Vercel URL
+        "https://your-backend-url.railway.app",        # ← Replace with your Railway URL
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

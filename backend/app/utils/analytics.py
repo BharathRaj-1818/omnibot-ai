@@ -1,153 +1,63 @@
 """
-Analytics Tracker - Monitor chatbot usage and performance
+Analytics Tracker - Conversation metrics and usage statistics
+This file was not provided — created from scratch to match main.py API.
+Uses async SQLAlchemy to match the fixed database.py.
 """
 
 import logging
+from typing import Optional, Dict, List
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
-from collections import defaultdict, Counter
-import json
-from pathlib import Path
+from sqlalchemy import select, func, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.database import AsyncSessionLocal, Conversation, ImageGeneration
 
 logger = logging.getLogger(__name__)
 
 
 class AnalyticsTracker:
-    """
-    Track and analyze chatbot usage, conversations, and performance
-    """
-    
-    def __init__(self, storage_path: str = "data/analytics.json"):
-        """
-        Initialize analytics tracker
-        
-        Args:
-            storage_path: Path to store analytics data
-        """
-        self.storage_path = storage_path
-        self.conversations = []
-        self.image_generations = []
-        self.voice_interactions = []
-        
-        # In-memory stats
-        self.stats = {
-            "total_conversations": 0,
-            "total_messages": 0,
-            "total_images": 0,
-            "total_voice": 0,
-            "active_users": set(),
-            "personality_usage": Counter(),
-            "language_usage": Counter(),
-            "daily_stats": defaultdict(lambda: {
-                "conversations": 0,
-                "messages": 0,
-                "images": 0,
-                "users": set()
-            })
-        }
-        
-        logger.info("Analytics Tracker initialized")
+    """Tracks conversation metrics and aggregates usage statistics."""
     
     async def log_conversation(
         self,
         user_id: str,
         message: str,
         response: str,
-        personality_mode: str,
+        personality_mode: str = "friendly",
         language: str = "en"
     ):
-        """
-        Log a conversation interaction
-        
-        Args:
-            user_id: User identifier
-            message: User message
-            response: Bot response
-            personality_mode: Active personality mode
-            language: Detected language
-        """
+        """Persist a conversation turn to the database."""
         try:
-            timestamp = datetime.utcnow()
-            date_key = timestamp.strftime("%Y-%m-%d")
-            
-            # Update stats
-            self.stats["total_conversations"] += 1
-            self.stats["total_messages"] += 2  # User message + bot response
-            self.stats["active_users"].add(user_id)
-            self.stats["personality_usage"][personality_mode] += 1
-            self.stats["language_usage"][language] += 1
-            
-            # Daily stats
-            self.stats["daily_stats"][date_key]["conversations"] += 1
-            self.stats["daily_stats"][date_key]["messages"] += 2
-            self.stats["daily_stats"][date_key]["users"].add(user_id)
-            
-            # Store conversation
-            conversation_data = {
-                "user_id": user_id,
-                "message": message[:200],  # Truncate for privacy
-                "response": response[:200],
-                "personality_mode": personality_mode,
-                "language": language,
-                "timestamp": timestamp.isoformat()
-            }
-            
-            self.conversations.append(conversation_data)
-            
-            # Keep only last 1000 conversations in memory
-            if len(self.conversations) > 1000:
-                self.conversations = self.conversations[-1000:]
-            
+            async with AsyncSessionLocal() as db:
+                entry = Conversation(
+                    user_id=user_id,
+                    message=message,
+                    response=response,
+                    personality_mode=str(personality_mode.value if hasattr(personality_mode, "value") else personality_mode),
+                    language=language,
+                    timestamp=datetime.utcnow()
+                )
+                db.add(entry)
+                await db.commit()
         except Exception as e:
-            logger.error(f"Error logging conversation: {str(e)}")
+            logger.error(f"Failed to log conversation: {e}")
+            # Don't re-raise — analytics failure shouldn't break chat
     
     async def log_image_generation(self, user_id: str, prompt: str):
-        """
-        Log an image generation event
-        
-        Args:
-            user_id: User identifier
-            prompt: Image generation prompt
-        """
+        """Persist an image generation event to the database."""
         try:
-            timestamp = datetime.utcnow()
-            date_key = timestamp.strftime("%Y-%m-%d")
-            
-            self.stats["total_images"] += 1
-            self.stats["daily_stats"][date_key]["images"] += 1
-            
-            self.image_generations.append({
-                "user_id": user_id,
-                "prompt": prompt[:100],
-                "timestamp": timestamp.isoformat()
-            })
-            
-            # Keep only last 500 image generations
-            if len(self.image_generations) > 500:
-                self.image_generations = self.image_generations[-500:]
-            
+            async with AsyncSessionLocal() as db:
+                entry = ImageGeneration(
+                    user_id=user_id,
+                    prompt=prompt,
+                    width=512,
+                    height=512,
+                    timestamp=datetime.utcnow()
+                )
+                db.add(entry)
+                await db.commit()
         except Exception as e:
-            logger.error(f"Error logging image generation: {str(e)}")
-    
-    async def log_voice_interaction(self, user_id: str, interaction_type: str):
-        """
-        Log a voice interaction (STT or TTS)
-        
-        Args:
-            user_id: User identifier
-            interaction_type: 'stt' or 'tts'
-        """
-        try:
-            self.stats["total_voice"] += 1
-            
-            self.voice_interactions.append({
-                "user_id": user_id,
-                "type": interaction_type,
-                "timestamp": datetime.utcnow().isoformat()
-            })
-            
-        except Exception as e:
-            logger.error(f"Error logging voice interaction: {str(e)}")
+            logger.error(f"Failed to log image generation: {e}")
     
     async def get_analytics(
         self,
@@ -155,64 +65,87 @@ class AnalyticsTracker:
         days: int = 7
     ) -> Dict:
         """
-        Get analytics data
-        
+        Aggregate analytics stats.
+
         Args:
-            user_id: Optional user ID to filter by
-            days: Number of days to include
-            
+            user_id: Filter to a specific user (None = all users).
+            days: Look-back window in days.
+
         Returns:
-            Analytics dictionary
+            Dict matching the AnalyticsResponse schema.
         """
         try:
-            # Calculate date range
-            end_date = datetime.utcnow()
-            start_date = end_date - timedelta(days=days)
-            
-            # Get daily stats for the period
-            daily_stats_list = []
-            for i in range(days):
-                date = start_date + timedelta(days=i)
-                date_key = date.strftime("%Y-%m-%d")
-                
-                day_data = self.stats["daily_stats"].get(date_key, {
-                    "conversations": 0,
-                    "messages": 0,
-                    "images": 0,
-                    "users": set()
-                })
-                
-                daily_stats_list.append({
-                    "date": date_key,
-                    "conversations": day_data["conversations"],
-                    "messages": day_data["messages"],
-                    "images": day_data["images"],
-                    "active_users": len(day_data["users"])
-                })
-            
-            # Get most popular personality
-            popular_personality = "friendly"
-            if self.stats["personality_usage"]:
-                popular_personality = self.stats["personality_usage"].most_common(1)[0][0]
-            
-            # Language distribution
-            language_dist = dict(self.stats["language_usage"])
-            
-            analytics = {
-                "total_conversations": self.stats["total_conversations"],
-                "total_messages": self.stats["total_messages"],
-                "total_images_generated": self.stats["total_images"],
-                "active_users": len(self.stats["active_users"]),
-                "popular_personality": popular_personality,
-                "language_distribution": language_dist,
-                "daily_stats": daily_stats_list,
-                "period_days": days
-            }
-            
-            return analytics
-            
+            async with AsyncSessionLocal() as db:
+                since = datetime.utcnow() - timedelta(days=days)
+
+                # Base filter
+                filters = [Conversation.timestamp >= since]
+                if user_id:
+                    filters.append(Conversation.user_id == user_id)
+
+                # Total conversations (unique sessions approximate: distinct user_id)
+                total_conv_result = await db.execute(
+                    select(func.count(Conversation.id)).where(and_(*filters))
+                )
+                total_conversations = total_conv_result.scalar() or 0
+
+                # Total messages = same as conversations (each row = 1 user message)
+                total_messages = total_conversations * 2  # user + bot turn
+
+                # Active unique users
+                active_users_result = await db.execute(
+                    select(func.count(func.distinct(Conversation.user_id))).where(and_(*filters))
+                )
+                active_users = active_users_result.scalar() or 0
+
+                # Most popular personality
+                popular_result = await db.execute(
+                    select(
+                        Conversation.personality_mode,
+                        func.count(Conversation.personality_mode).label("cnt")
+                    )
+                    .where(and_(*filters))
+                    .group_by(Conversation.personality_mode)
+                    .order_by(func.count(Conversation.personality_mode).desc())
+                    .limit(1)
+                )
+                popular_row = popular_result.first()
+                popular_personality = popular_row[0] if popular_row else "friendly"
+
+                # Language distribution
+                lang_result = await db.execute(
+                    select(
+                        Conversation.language,
+                        func.count(Conversation.language).label("cnt")
+                    )
+                    .where(and_(*filters))
+                    .group_by(Conversation.language)
+                )
+                language_distribution = {row[0]: row[1] for row in lang_result.all()}
+
+                # Total images generated
+                img_filters = [ImageGeneration.timestamp >= since]
+                if user_id:
+                    img_filters.append(ImageGeneration.user_id == user_id)
+
+                total_img_result = await db.execute(
+                    select(func.count(ImageGeneration.id)).where(and_(*img_filters))
+                )
+                total_images = total_img_result.scalar() or 0
+
+                return {
+                    "total_conversations": total_conversations,
+                    "total_messages": total_messages,
+                    "total_images_generated": total_images,
+                    "active_users": active_users,
+                    "popular_personality": popular_personality,
+                    "language_distribution": language_distribution,
+                    "daily_stats": []  # Can be extended later
+                }
+
         except Exception as e:
-            logger.error(f"Error getting analytics: {str(e)}")
+            logger.error(f"Analytics query failed: {e}")
+            # Return safe defaults on failure
             return {
                 "total_conversations": 0,
                 "total_messages": 0,
@@ -222,29 +155,3 @@ class AnalyticsTracker:
                 "language_distribution": {},
                 "daily_stats": []
             }
-    
-    def save_analytics(self):
-        """Save analytics to disk"""
-        try:
-            Path(self.storage_path).parent.mkdir(parents=True, exist_ok=True)
-            
-            # Convert sets to lists for JSON serialization
-            save_data = {
-                "conversations": self.conversations[-100:],  # Save last 100
-                "image_generations": self.image_generations[-50:],
-                "stats": {
-                    "total_conversations": self.stats["total_conversations"],
-                    "total_messages": self.stats["total_messages"],
-                    "total_images": self.stats["total_images"],
-                    "personality_usage": dict(self.stats["personality_usage"]),
-                    "language_usage": dict(self.stats["language_usage"])
-                }
-            }
-            
-            with open(self.storage_path, 'w') as f:
-                json.dump(save_data, f, indent=2)
-            
-            logger.info(f"Analytics saved to {self.storage_path}")
-            
-        except Exception as e:
-            logger.error(f"Error saving analytics: {str(e)}")

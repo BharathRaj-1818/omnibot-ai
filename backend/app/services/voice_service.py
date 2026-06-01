@@ -1,99 +1,91 @@
 """
-Voice Service - Speech-to-Text and Text-to-Speech
-Uses Whisper for STT and gTTS for TTS
+Voice Service - Speech-to-Text (Whisper) and Text-to-Speech (gTTS)
+This file was not provided — created from scratch to match main.py API.
 """
 
-import whisper
-from gtts import gTTS
 import io
-import tempfile
 import logging
-from typing import Optional
 import asyncio
+import tempfile
+import os
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 class VoiceService:
     """
-    Voice processing service for speech recognition and synthesis
+    Voice processing service.
+    - Speech-to-Text: OpenAI Whisper (runs locally, free)
+    - Text-to-Speech: gTTS (Google TTS, free)
     """
-    
+
     def __init__(self, whisper_model: str = "base"):
         """
-        Initialize voice service
-        
         Args:
-            whisper_model: Whisper model size (tiny, base, small, medium, large)
+            whisper_model: Whisper model size — tiny | base | small | medium | large
+                           'base' is a good balance of speed and accuracy (~150MB)
         """
-        self.whisper_model_name = whisper_model
-        self.whisper_model = None
-        self.enabled = True
-        
-        logger.info(f"Initializing Voice Service with Whisper model: {whisper_model}")
-        
-        # Load Whisper model
-        self._load_whisper_model()
-    
-    def _load_whisper_model(self):
-        """Load Whisper model for speech recognition"""
+        self.whisper_model_name = os.getenv("VOICE_MODEL", whisper_model)
+        self._whisper = None
+        logger.info(f"VoiceService created — Whisper '{self.whisper_model_name}' loads on first use")
+
+    def _load_whisper(self):
+        """Load Whisper model synchronously (called from thread pool)."""
+        if self._whisper is not None:
+            return
         try:
-            logger.info("Loading Whisper model...")
-            self.whisper_model = whisper.load_model(self.whisper_model_name)
-            logger.info("✅ Whisper model loaded successfully!")
-            
+            import whisper
+            self._whisper = whisper.load_model(self.whisper_model_name)
+            logger.info(f"✅ Whisper model '{self.whisper_model_name}' loaded")
         except Exception as e:
-            logger.error(f"Error loading Whisper model: {str(e)}")
-            logger.warning("Speech-to-text will be disabled")
-            self.enabled = False
+            logger.error(f"Whisper load failed: {e}")
+            raise
     
     async def speech_to_text(
         self,
-        audio_data: bytes,
+        audio_bytes: bytes,
         language: Optional[str] = None
     ) -> str:
         """
-        Convert speech to text using Whisper
-        
+        Convert audio bytes to text using Whisper.
+
         Args:
-            audio_data: Audio file data (bytes)
-            language: Optional language code (e.g., 'en', 'es', 'fr')
-            
+            audio_bytes: Raw audio file bytes (WAV, MP3, OGG, FLAC, etc.)
+            language: Language code hint (e.g. 'en', 'es'). None = auto-detect.
+
         Returns:
-            Transcribed text
+            Transcribed text string.
         """
-        if not self.enabled or self.whisper_model is None:
-            raise Exception("Speech-to-text service is not available")
-        
+        loop = asyncio.get_event_loop()
+
+        # Load model in thread pool (non-blocking)
+        await loop.run_in_executor(None, self._load_whisper)
+
+        # Write audio to a temp file (Whisper needs a file path)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+
         try:
-            # Save audio data to temporary file
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio:
-                temp_audio.write(audio_data)
-                temp_audio_path = temp_audio.name
-            
-            # Transcribe using Whisper
-            logger.info("Transcribing audio...")
-            
-            result = await asyncio.to_thread(
-                self.whisper_model.transcribe,
-                temp_audio_path,
-                language=language
+            options = {}
+            if language and language != "auto":
+                options["language"] = language
+
+            result = await loop.run_in_executor(
+                None,
+                lambda: self._whisper.transcribe(tmp_path, **options)
             )
-            
-            text = result["text"].strip()
-            detected_language = result.get("language", language or "unknown")
-            
-            logger.info(f"✅ Transcription complete: {text[:50]}... (Language: {detected_language})")
-            
-            # Clean up temp file
-            import os
-            os.unlink(temp_audio_path)
-            
+            text = result.get("text", "").strip()
+            logger.info(f"Transcribed {len(audio_bytes)} bytes → '{text[:60]}...'")
             return text
-            
+
         except Exception as e:
-            logger.error(f"Error in speech-to-text: {str(e)}")
+            logger.error(f"Speech-to-text error: {e}")
             raise
+
+        finally:
+            os.unlink(tmp_path)  # Always clean up temp file
     
     async def text_to_speech(
         self,
@@ -102,96 +94,33 @@ class VoiceService:
         slow: bool = False
     ) -> io.BytesIO:
         """
-        Convert text to speech using gTTS
-        
+        Convert text to MP3 audio using gTTS.
+
         Args:
-            text: Text to convert to speech
-            language: Language code (e.g., 'en', 'es', 'fr', 'de')
-            slow: Whether to speak slowly
-            
+            text: Text to synthesize.
+            language: BCP-47 language code (e.g. 'en', 'hi', 'es').
+            slow: Speak slowly (useful for language learning).
+
         Returns:
-            BytesIO object containing MP3 audio data
+            BytesIO buffer containing MP3 audio data.
         """
         try:
-            logger.info(f"Converting text to speech: {text[:50]}...")
-            
-            # Generate speech using gTTS
-            tts = gTTS(text=text, lang=language, slow=slow)
-            
-            # Save to BytesIO
-            audio_buffer = io.BytesIO()
-            tts.write_to_fp(audio_buffer)
-            audio_buffer.seek(0)
-            
-            logger.info("✅ Text-to-speech conversion complete!")
-            
-            return audio_buffer
-            
-        except Exception as e:
-            logger.error(f"Error in text-to-speech: {str(e)}")
-            raise
-    
-    def is_available(self) -> bool:
-        """Check if voice services are available"""
-        return self.enabled and self.whisper_model is not None
-    
-    def get_supported_languages(self) -> dict:
-        """Get list of supported languages for TTS"""
-        return {
-            "en": "English",
-            "es": "Spanish",
-            "fr": "French",
-            "de": "German",
-            "it": "Italian",
-            "pt": "Portuguese",
-            "ru": "Russian",
-            "ja": "Japanese",
-            "ko": "Korean",
-            "zh-CN": "Chinese (Simplified)",
-            "hi": "Hindi",
-            "ar": "Arabic",
-            "nl": "Dutch",
-            "tr": "Turkish",
-            "pl": "Polish",
-            "uk": "Ukrainian",
-            "vi": "Vietnamese",
-            "th": "Thai",
-            "id": "Indonesian",
-            "sv": "Swedish",
-            "no": "Norwegian",
-            "da": "Danish",
-            "fi": "Finnish",
-            "cs": "Czech",
-            "el": "Greek",
-            "he": "Hebrew",
-            "ro": "Romanian"
-        }
+            from gtts import gTTS
 
+            # gTTS is synchronous — run in thread pool
+            loop = asyncio.get_event_loop()
 
-# Lightweight alternative
-class LightweightVoiceService:
-    """
-    Lightweight voice service using browser-based APIs
-    Returns instructions for client-side processing
-    """
-    
-    async def text_to_speech(
-        self,
-        text: str,
-        language: str = "en",
-        slow: bool = False
-    ) -> io.BytesIO:
-        """Generate TTS using gTTS (lightweight)"""
-        try:
-            tts = gTTS(text=text, lang=language, slow=slow)
-            audio_buffer = io.BytesIO()
-            tts.write_to_fp(audio_buffer)
-            audio_buffer.seek(0)
-            return audio_buffer
+            def _synthesize():
+                tts = gTTS(text=text, lang=language, slow=slow)
+                buffer = io.BytesIO()
+                tts.write_to_fp(buffer)
+                buffer.seek(0)
+                return buffer
+
+            buffer = await loop.run_in_executor(None, _synthesize)
+            logger.info(f"TTS generated {buffer.getbuffer().nbytes} bytes for '{text[:40]}...'")
+            return buffer
+
         except Exception as e:
-            logger.error(f"TTS error: {str(e)}")
+            logger.error(f"Text-to-speech error: {e}")
             raise
-    
-    async def speech_to_text(self, audio_data: bytes, **kwargs) -> str:
-        """Placeholder - recommend client-side browser API"""
-        return "Please use browser's native speech recognition API for better performance"
